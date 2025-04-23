@@ -1023,10 +1023,12 @@ export class Raft extends EventEmitter {
     const entry = await this.db.appendEntry({
       command,
       term: this.term,
-      commited: false,
+      commited: 0,
     });
-    const appendPacket = await this.appendPacket(entry);
-    this.message(RAFT_STATE.FOLLOWER, appendPacket, undefined);
+    if (entry) {
+      const appendPacket = await this.appendPacket(entry);
+      this.message(RAFT_STATE.FOLLOWER, appendPacket, undefined);
+    }
   }
 
   /**

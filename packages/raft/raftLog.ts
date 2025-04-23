@@ -1,4 +1,5 @@
 import { DB } from "https://deno.land/x/sqlite@v3.9.1/mod.ts";
+import config from "./config/raft.json" with { type: "json" };
 
 enum Tables {
   RAFT_LOG = "raft_log",
@@ -9,14 +10,14 @@ export interface AddEntry {
   index?: number;
   term: number;
   command: string;
-  commited: boolean;
+  commited?: number;
 }
 
 export interface Entry {
   index: number;
   term: number;
   command: string;
-  commited: boolean;
+  commited: number;
 }
 
 export class Log {
@@ -24,7 +25,7 @@ export class Log {
   private commitIndex: number;
   private lastApplied: number;
 
-  constructor(path = "raft_log.db") {
+  constructor(path = config.db_path) {
     this.db = new DB(path);
     this.init_log();
     this.commitIndex = this.getMeta("commit_index");
@@ -67,9 +68,10 @@ export class Log {
   createRaftLogTable() {
     this.db.execute(`
       CREATE TABLE IF NOT EXISTS ${Tables.RAFT_LOG} (
-        index INTEGER PRIMARY KEY AUTOINCREMENT,
+        idx INTEGER PRIMARY KEY AUTOINCREMENT,
         term INTEGER NOT NULL,
-        command TEXT NOT NULL
+        command TEXT NOT NULL,
+        commited BOOLEAN NOT NULL
       );
     `);
   }
@@ -83,34 +85,42 @@ export class Log {
     `);
   }
 
-  appendEntry(entry: AddEntry): Entry {
-    const rows = this.db.query<[number, number, string, boolean]>(
-      `INSERT INTO ${Tables.RAFT_LOG} (index, term, command, commited) VALUES (?, ?, ?, ?)`,
-      [entry.index, entry.term, entry.command, entry.commited]
+  appendEntry(entry: AddEntry, result?: boolean): Entry | null {
+    this.db.query<[number, string, number]>(
+      `INSERT INTO ${Tables.RAFT_LOG} (term, command, commited) VALUES (?, ?, ?)`,
+      [entry.term, entry.command, 0]
     );
-    return {
-      ...entry,
-      index: rows[0][0],
-    };
+    if (result) {
+      const lastInsertRowId = this.db.lastInsertRowId
+      const rows = this.getEntry(lastInsertRowId)
+      if (rows) {
+        return {
+          ...entry,
+          index: rows.index,
+          commited: 0,
+        };
+      }
+    }
+    return null
   }
 
-  saveCommand(command: string, term: number, index: number): Entry {
+  saveCommand(command: string, term: number, index: number): Entry | null {
     return this.appendEntry({
       term,
       command,
       index,
-      commited: false,
+      commited: 0,
     });
   }
 
   appendEntries(entries: Entry[]): void {
     const insert = this.db.prepareQuery(
-      `INSERT INTO ${Tables.RAFT_LOG} (index, term, command) VALUES (?, ?, ?)`
+      `INSERT INTO ${Tables.RAFT_LOG} (idx, term, command, commited) VALUES (?, ?, ?, ?)`
     );
     try {
       this.db.transaction(() => {
         for (const e of entries) {
-          insert.execute([e.index, e.term, e.command]);
+          insert.execute([e.index, e.term, e.command, false]);
         }
       });
     } finally {
@@ -119,14 +129,14 @@ export class Log {
   }
 
   getLastLogIndex(): number {
-    const result = this.db.query(`SELECT MAX(index) FROM ${Tables.RAFT_LOG}`);
+    const result = this.db.query(`SELECT MAX(idx) FROM ${Tables.RAFT_LOG}`);
     for (const [index] of result) return (index as number) ?? 0;
     return 0;
   }
 
   getLastLogTerm(): number {
     const result = this.db.query(
-      `SELECT term FROM ${Tables.RAFT_LOG} ORDER BY index DESC LIMIT 1`
+      `SELECT term FROM ${Tables.RAFT_LOG} ORDER BY idx DESC LIMIT 1`
     );
     for (const [term] of result) return term as number;
     return 0;
@@ -140,7 +150,7 @@ export class Log {
   getPrevLogTerm(): number {
     const prev = this.getPrevLogIndex();
     const result = this.db.query(
-      `SELECT term FROM ${Tables.RAFT_LOG} WHERE index = ?`,
+      `SELECT term FROM ${Tables.RAFT_LOG} WHERE idx = ?`,
       [prev]
     );
     for (const [term] of result) return term as number;
@@ -182,8 +192,8 @@ export class Log {
   }
 
   getEntry(index: number): Entry | null {
-    const result = this.db.query<[number, number, string, boolean]>(
-      `SELECT index, term, command, commited FROM ${Tables.RAFT_LOG} WHERE index = ?`,
+    const result = this.db.query<[number, number, string, number]>(
+      `SELECT idx, term, command, commited FROM ${Tables.RAFT_LOG} WHERE idx = ?`,
       [index]
     );
     for (const [index, term, command, commited] of result) {
@@ -199,8 +209,8 @@ export class Log {
 
   getEntries(fromIndex: number, toIndex: number): Entry[] {
     const data: Entry[] = [
-      ...this.db.query<[number, number, string, boolean]>(
-        `SELECT index, term, command, commited FROM ${Tables.RAFT_LOG} WHERE index >= ? AND index < ? ORDER BY index ASC`,
+      ...this.db.query<[number, number, string, number]>(
+        `SELECT idx, term, command, commited FROM ${Tables.RAFT_LOG} WHERE idx >= ? AND idx < ? ORDER BY idx ASC`,
         [fromIndex, toIndex]
       ),
     ].map(([index, term, command, commited]) => ({
@@ -235,7 +245,7 @@ export class Log {
     command: string;
   } | null {
     const result = this.db.query<[number, number, string]>(
-      `SELECT index, term, command FROM ${Tables.RAFT_LOG} ORDER BY id DESC LIMIT 1`
+      `SELECT idx, term, command FROM ${Tables.RAFT_LOG} ORDER BY id DESC LIMIT 1`
     );
     for (const row of result) {
       return {
@@ -248,12 +258,12 @@ export class Log {
   }
 
   removeEntriesAfter(index: number) {
-    this.db.query(`DELETE FROM ${Tables.RAFT_LOG} WHERE index > ?`, [index]);
+    this.db.query(`DELETE FROM ${Tables.RAFT_LOG} WHERE idx > ?`, [index]);
   }
 
   has(index: number) {
     const entry = this.db.query(
-      `SELECT index FROM ${Tables.RAFT_LOG} WHERE index=${index}`
+      `SELECT idx FROM ${Tables.RAFT_LOG} WHERE idx=${index}`
     );
     if (entry.length > 0) return true;
     return false;
@@ -275,8 +285,8 @@ export class Log {
     // Fetch uncommitted entries up to the given index
     for (const [commitIndex] of rows) {
       const entries: Entry[] = await this.db
-        .query<[number, number, string, boolean]>(
-          `SELECT index, term, command FROM ${Tables.RAFT_LOG} WHERE id > ? AND id <= ? ORDER BY id ASC`,
+        .query<[number, number, string, number]>(
+          `SELECT idx, term, command FROM ${Tables.RAFT_LOG} WHERE id > ? AND id <= ? ORDER BY id ASC`,
           [commitIndex, index]
         )
         .map(([index, term, command, commited]) => ({
@@ -297,10 +307,10 @@ export class Log {
     }
 
     const sql = `
-      SELECT index, term, command
+      SELECT idx, term, command
       FROM raft_log
-      WHERE index < ?
-      ORDER BY index DESC
+      WHERE idx < ?
+      ORDER BY idx DESC
       LIMIT 1
     `;
 
@@ -331,7 +341,7 @@ export class Log {
       `
       UPDATE ${Tables.RAFT_LOG}
       SET commited = ?
-      WHERE index = ?
+      WHERE idx = ?
     `,
       [true, index]
     );
