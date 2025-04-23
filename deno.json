@@ -1,0 +1,21 @@
+{
+  "workspace": {
+    "members": ["./packages/*"]
+  },
+  "compilerOptions": {
+    "lib": ["dom", "deno.ns"]
+  },
+  "tasks": {
+    "dev": "deno run --allow-env --watch ./main.ts",
+    "run": "deno run ./main.ts",
+    "server": "deno run --allow-net --allow-read --allow-write --allow-env --watch http/main.ts",
+    "start:app1": "deno run --allow-net apps/app1/main.ts",
+    "start:app2": "deno run --allow-net apps/app2/main.ts"
+  },
+  "imports": {
+    "@oak/oak": "jsr:@oak/oak@^17.1.4",
+    "@openai/openai": "jsr:@openai/openai@^4.91.1",
+    "@std/assert": "jsr:@std/assert@1",
+    "axios": "npm:axios@^1.8.4"
+  }
+}
