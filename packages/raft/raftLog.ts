@@ -245,7 +245,7 @@ export class Log {
     command: string;
   } | null {
     const result = this.db.query<[number, number, string]>(
-      `SELECT idx, term, command FROM ${Tables.RAFT_LOG} ORDER BY id DESC LIMIT 1`
+      `SELECT idx, term, command FROM ${Tables.RAFT_LOG} ORDER BY idx DESC LIMIT 1`
     );
     for (const row of result) {
       return {
@@ -343,7 +343,7 @@ export class Log {
       SET commited = ?
       WHERE idx = ?
     `,
-      [true, index]
+      [1, index]
     );
   }
 
