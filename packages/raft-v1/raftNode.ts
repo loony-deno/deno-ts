@@ -1,8 +1,8 @@
 // deno-lint-ignore-file no-explicit-any
 import EventEmitter from "node:events";
 import { Tick } from "@scope/timer";
-import { modification, Changeable } from "./modification.ts";
-import { Entry, Log } from "./raftLog.ts";
+import { modification, type Changeable } from "./modification.ts";
+import { type Entry, Log } from "./raftLog.ts";
 
 enum RAFT_STATE {
   STOPPED = 0,
@@ -12,6 +12,12 @@ enum RAFT_STATE {
   CHILD = 4,
 }
 
+export enum MESSAGE {
+  TERM_CHANGE = "TC",
+  STATE_CHANGE = "SC",
+  DATA = "DATA",
+  PING = "PING",
+}
 const RAFT_STATES = [
   RAFT_STATE.STOPPED,
   RAFT_STATE.LEADER,
@@ -20,7 +26,7 @@ const RAFT_STATES = [
   RAFT_STATE.CHILD,
 ];
 
-type Packet = {
+export type Packet = {
   state: number;
   term: number;
   address: number;
@@ -28,6 +34,17 @@ type Packet = {
   leader: number | null;
   last?: any; // Mark as optional since it's conditionally added
   data?: any; // Also optional
+};
+
+export type CreateOptions = {
+  threshold?: number;
+  address: number;
+  state?: RAFT_STATE;
+  election: {
+    min: number;
+    max: number;
+  };
+  heartbeat: number;
 };
 
 const change = modification();
@@ -63,19 +80,7 @@ export class Raft extends EventEmitter {
 
   change: <T extends Changeable>(this: any, changed: Partial<T>) => T;
 
-  constructor(
-    address: number,
-    options: {
-      threshold?: number;
-      address: number;
-      state?: RAFT_STATE;
-      election: {
-        min: number;
-        max: number;
-      };
-      heartbeat: number;
-    }
-  ) {
+  constructor(address: number, options: CreateOptions) {
     super();
 
     if ("object" === typeof address) options = address;
@@ -119,7 +124,24 @@ export class Raft extends EventEmitter {
     // Our current term.
     this.term = 0;
 
-    this._initialize(options);
+    this.initSelf();
+  }
+
+  static create<T extends typeof Raft>(
+    this: T,
+    address: number,
+    options: {
+      threshold?: number;
+      address: number;
+      state?: RAFT_STATE;
+      election: {
+        min: number;
+        max: number;
+      };
+      heartbeat: number;
+    }
+  ) {
+    return new this(address, options);
   }
 
   /**
@@ -127,14 +149,17 @@ export class Raft extends EventEmitter {
    * emitting as we're quite chatty to provide the maximum amount of flexibility
    * and reconfigurability.
    *
-   * @param {Object} options The configuration you passed in the constructor.
    * @private
    */
-  _initialize(options: any) {
+  initSelf() {
     //
     // Reset our vote as we're starting a new term. Votes only last one term.
     //
-    this.on("term change", () => {
+    this.on(MESSAGE.PING, () => {
+      console.log("PING");
+    });
+
+    this.on(MESSAGE.TERM_CHANGE, () => {
       this.votes.for = null;
       this.votes.granted = 0;
     });
@@ -143,7 +168,7 @@ export class Raft extends EventEmitter {
     // Reset our times and start the heartbeat again. If we're promoted to leader
     // the heartbeat will automatically be broadcasted to users as well.
     //
-    this.on("state change", (state) => {
+    this.on(MESSAGE.STATE_CHANGE, (state) => {
       this.timers.clear(["heartbeat", "election"]);
       this.heartbeat(
         RAFT_STATE.LEADER === this.state ? this.beat : this.timeout()
@@ -154,8 +179,8 @@ export class Raft extends EventEmitter {
     //
     // Receive incoming messages and process them.
     //
-    this.on("data", async (packet, write) => {
-      write = write || nope;
+    this.on(MESSAGE.DATA, async (packet: Packet, write) => {
+      // write = write || nope;
       let reason;
 
       if ("object" !== this.type(packet)) {
@@ -451,19 +476,19 @@ export class Raft extends EventEmitter {
      */
     // :TODO
     // const initialize = (err: any) => {
-    //   if (err) return this.emit("error", err)
+    //   if (err) return this.emit("error", err);
 
-    //   this.emit("initialize")
-    //   this.heartbeat(this.timeout())
+    //   this.emit("initialize");
+    //   this.heartbeat(this.timeout());
+    // };
+
+    // if ("function" === this.type(this.initialize)) {
+    //   if (this.initialize.length === 2)
+    //     return this.initialize(options, initialize);
+    //   this.initialize(options);
     // }
 
-    // if ("function" === this.type(this._initialize)) {
-    //   if (this._initialize.length === 2)
-    //     return this._initialize(options, initialize)
-    //   this._initialize(options)
-    // }
-
-    // initialize()
+    // initialize();
   }
 
   /**
@@ -884,24 +909,29 @@ export class Raft extends EventEmitter {
    * @returns {Raft} The newly created instance.
    * @public
    */
-  clone(options: any) {
-    options = options || {};
+  clone(address: number, options: CreateOptions | undefined) {
+    const newOptions: any = options || {};
 
     const node: any = {
       Log: this.log,
-      "election max": this.election?.max,
-      "election min": this.election?.min,
+      election: {
+        min: this.election?.min,
+        max: this.election?.max,
+      },
       heartbeat: this.beat,
       threshold: this.threshold,
     };
 
     for (const key in node) {
-      if (key in options || !Object.prototype.hasOwnProperty.call(node, key))
+      if (
+        (options && key in options) ||
+        !Object.prototype.hasOwnProperty.call(node, key)
+      )
         continue;
-      options[key] = node[key];
+      newOptions[key] = node[key];
     }
 
-    return this.constructor(options);
+    return Raft.create(address, newOptions);
   }
 
   /**
@@ -927,20 +957,18 @@ export class Raft extends EventEmitter {
     //
     if (this.address === address) return;
 
-    const node = this.clone({
-      write: write, // Optional function that receives our writes.
-      address: address, // A custom address for the raft we added.
-      state: RAFT_STATE.CHILD, // We are a raft in the cluster.
-    });
-    const end = () => {
-      this.leave(node);
-    };
-    node.once("end", end, this);
+    if (address) {
+      const node = this.clone(address, undefined);
+      const end = () => {
+        this.leave(node.address);
+      };
+      node.once("end", end);
 
-    this.nodes.push(node);
-    this.emit("join", node);
+      this.nodes.push(node);
+      this.emit("join", node);
 
-    return node;
+      return node;
+    }
   }
 
   /**

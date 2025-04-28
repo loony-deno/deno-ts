@@ -1,7 +1,7 @@
 {
-  "name": "@scope/raft",
+  "name": "@scope/raft-v2",
   "version": "0.1.0",
-  "exports": "./mod.ts",
+  "exports": "./node.ts",
   "fmt": {
     "semiColons": false
   }

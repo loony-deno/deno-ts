@@ -337,7 +337,7 @@ export class Log {
   }
 
   commit(index: number): void {
-    const result = this.db.query(
+    this.db.query(
       `
       UPDATE ${Tables.RAFT_LOG}
       SET commited = ?
