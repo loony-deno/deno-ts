@@ -619,6 +619,7 @@ export class Raft extends EventEmitter {
         this.message(RAFT_STATE.FOLLOWER, packet, undefined).heartbeat(
           this.beat
         );
+        console.log("heartbeat");
       },
       duration || 1000
     );

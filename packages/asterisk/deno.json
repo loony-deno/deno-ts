@@ -1,0 +1,11 @@
+{
+  "name": "@scope/asterisk",
+  "version": "0.1.0",
+  "exports": "./src/client.ts",
+  "fmt": {
+    "semiColons": false
+  },
+  "imports": {
+    "axios": "npm:axios@^1.9.0"
+  }
+}
