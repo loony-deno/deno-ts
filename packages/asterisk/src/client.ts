@@ -6,11 +6,19 @@ import {
   playAudio,
 } from "./utils.ts"
 
+import RtpUdpServerSocket from "./externalMedia.ts"
+
 const username = "loony"
 const password = "password"
 const appName = "loony"
 
 function main() {
+  const externalMedia = new RtpUdpServerSocket({
+    host: "127.0.0.1:8081",
+    swap16: true,
+    audioOutputPath: "/home/sankar/Music/output.raw",
+  })
+
   const ws = new WebSocket(
     `ws://localhost:8088/ari/events?api_key=${username}:${password}&app=${appName}`,
   )
@@ -26,6 +34,7 @@ function main() {
           console.log("StasisStart", "PJSIP")
           await answerCall(id)
           await playAudio(id, "hello-world")
+          externalMedia.emit("start")
           const bridge = await createBridge("loony")
           const e_channel = await createExternalMediaChannel()
           await addChannelToBridge(bridge.id, id)
@@ -40,6 +49,7 @@ function main() {
       }
       case "ChannelHangupRequest": {
         console.log("ChannelHangupRequest")
+        externalMedia.emit("stop")
         break
       }
       case "ChannelDtmfReceived": {

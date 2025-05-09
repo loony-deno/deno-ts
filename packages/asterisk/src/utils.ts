@@ -1,210 +1,147 @@
-const username = "loony";
-const password = "password";
-const appName = "loony";
+// deno-lint-ignore-file no-explicit-any
+import axios from "npm:axios"
 
-const Authorization = "Basic " + btoa(`${username}:${password}`);
+const baseURL = "http://localhost:8088"
+const username = "loony"
+const password = "password"
+const appName = "loony"
 
-const createBridge = async (name: string) => {
-  const url = "http://localhost:8088/ari/bridges";
-  const headers = new Headers({
+const Authorization = "Basic " + btoa(`${username}:${password}`)
+
+const client = axios.create({
+  baseURL: `${baseURL.replace(/\/$/, "")}/ari`,
+  headers: {
     Authorization,
     "Content-Type": "application/json",
-  });
+  },
+})
 
-  // Optional: You can provide type (mixing, holding, dtmf_events, etc.) and bridgeId
-  const body = JSON.stringify({
-    type: "mixing",
-    name,
-  });
-
-  const response = await fetch(url, {
-    method: "POST",
-    headers,
-    body,
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    console.error("Failed to create bridge:", error);
-    return null;
-  } else {
-    const bridge = await response.json();
-    console.log(`Ok. Bridge created. ${bridge.id}`);
-    return bridge;
-  }
-};
+const createBridge = (name: string): Promise<boolean | any> => {
+  const url = "/bridges"
+  return new Promise((resolve, reject) => {
+    client.post(url, {
+      type: "mixing",
+      name,
+    }).then((res) => {
+      resolve(res.data)
+    }).catch(() => {
+      reject(false)
+    })
+  })
+}
 
 const wait = (ms: number) => {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-};
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
 
-const addChannelToBridge = async (bridgeId: string, channelId: string) => {
-  const url = `http://localhost:8088/ari/bridges/${bridgeId}/addChannel?channel=${channelId}`;
-  const headers = new Headers({
-    Authorization,
-  });
+const addChannelToBridge = (
+  bridgeId: string,
+  channelId: string,
+): Promise<boolean> => {
+  const url = `/bridges/${bridgeId}/addChannel?channel=${channelId}`
+  return new Promise((resolve, reject) => {
+    client.post(url).then(
+      () => {
+        console.log(`Channel ${channelId} added to bridge ${bridgeId}.`)
+        resolve(true)
+      },
+    ).catch(() => {
+      reject(false)
+    })
+  })
+}
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers,
-  });
+const answerCall = (channelId: string) => {
+  const url = `/channels/${channelId}/answer`
+  return new Promise((resolve, reject) => {
+    client.post(url).then(
+      () => {
+        console.log("Call answered.", channelId)
+        resolve(true)
+      },
+    ).catch(() => {
+      reject(false)
+    })
+  })
+}
 
-  if (!response.ok) {
-    const error = await response.text();
-    console.error(
-      `Failed to add channel ${channelId} to bridge ${bridgeId}`,
-      error
-    );
-  } else {
-    console.log(`Channel ${channelId} added to bridge ${bridgeId}`);
-  }
-};
+const playAudio = (channelId: string, audio: string) => {
+  const url = `/channels/${channelId}/play?media=sound:${audio}`
+  return new Promise((resolve, reject) => {
+    client.post(url).then(
+      () => {
+        resolve(true)
+      },
+    ).catch(() => {
+      reject(false)
+    })
+  })
+}
 
-const answerCall = async (channelId: string) => {
-  const url = `http://localhost:8088/ari/channels/${channelId}/answer`;
-  const headers = new Headers({
-    Authorization,
-  });
+const createExternalMediaChannel = (): Promise<any | boolean> => {
+  const host = "127.0.0.1"
+  const port = 8081
+  const external_host = encodeURIComponent(`${host}:${port}`)
+  const url =
+    `/channels/externalMedia?app=${appName}&external_host=${external_host}&format=slin16`
+  return new Promise((resolve, reject) => {
+    client.post(url).then(
+      (res) => {
+        resolve(res.data)
+      },
+    ).catch(() => {
+      reject(false)
+    })
+  })
+}
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers,
-  });
+const getChannels = () => {
+  const url = `/channels`
+  return new Promise((resolve, reject) => {
+    client.get(url).then(
+      (res) => {
+        resolve(res.data)
+      },
+    ).catch(() => {
+      reject(false)
+    })
+  })
+}
 
-  if (!response.ok) {
-    const error = await response.text();
-    console.error("Answer call failed:", error);
-    return false;
-  } else {
-    console.log(`Channel ${channelId} answered`);
-    return true;
-  }
-};
+const getBridges = () => {
+  const url = `/bridges`
+  return new Promise((resolve, reject) => {
+    client.get(url).then(
+      (res) => {
+        resolve(res.data)
+      },
+    ).catch(() => {
+      reject(false)
+    })
+  })
+}
 
-const playAudio = async (channelId: string, audio: string) => {
-  const url = `http://localhost:8088/ari/channels/${channelId}/play?media=sound:${audio}`;
-  const headers = new Headers({
-    Authorization,
-  });
-
-  const response = await fetch(url, {
-    method: "POST",
-    headers,
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    console.error("Failed to play:", error);
-  } else {
-    console.log(`Audio ${audio} played to ChannelId: ${channelId}`);
-  }
-};
-
-const createExternalMediaChannel = async () => {
-  const host = "127.0.0.1";
-  const port = 8081;
-  const external_host = encodeURIComponent(`${host}:${port}`);
-
-  const url = `http://localhost:8088/ari/channels/externalMedia?app=${appName}&external_host=${external_host}&format=slin16`;
-
-  const headers = new Headers({
-    Authorization,
-  });
-  const response = await fetch(url, {
-    method: "POST",
-    headers,
-  });
-
-  if (!response.ok) {
-    console.error(
-      "Failed to create external media channel:",
-      await response.text()
-    );
-    return;
-  } else {
-    const channel = await response.json();
-    console.log(`Ok. Created externalMedia ${channel.id}`);
-    return channel;
-  }
-};
-
-const getChannels = async () => {
-  const url = `http://localhost:8088/ari/channels`;
-
-  const headers = new Headers({
-    Authorization,
-  });
-  const response = await fetch(url, {
-    method: "GET",
-    headers,
-  });
-
-  if (!response.ok) {
-    console.error(
-      "Failed to create external media channel:",
-      await response.text()
-    );
-    return;
-  } else {
-    const channels = await response.json();
-    return channels;
-  }
-};
-
-const getBridges = async () => {
-  const url = `http://localhost:8088/ari/bridges`;
-
-  const headers = new Headers({
-    Authorization,
-  });
-  const response = await fetch(url, {
-    method: "GET",
-    headers,
-  });
-
-  if (!response.ok) {
-    console.error(
-      "Failed to create external media channel:",
-      await response.text()
-    );
-    return;
-  } else {
-    const bridges = await response.json();
-    return bridges;
-  }
-};
-
-const getBridgeById = async (bridgeId: string) => {
-  const url = `http://localhost:8088/ari/bridges/${bridgeId}`;
-
-  const headers = new Headers({
-    Authorization,
-  });
-  const response = await fetch(url, {
-    method: "GET",
-    headers,
-  });
-
-  if (!response.ok) {
-    console.error(
-      "Failed to create external media channel:",
-      await response.text()
-    );
-    return;
-  } else {
-    const bridges = await response.json();
-    return bridges;
-  }
-};
+const getBridgeById = (bridgeId: string) => {
+  const url = `/bridges/${bridgeId}`
+  return new Promise((resolve, reject) => {
+    client.get(url).then(
+      (res) => {
+        resolve(res.data)
+      },
+    ).catch(() => {
+      reject(false)
+    })
+  })
+}
 
 export {
-  createBridge,
-  createExternalMediaChannel,
-  wait,
-  playAudio,
   addChannelToBridge,
   answerCall,
-  getChannels,
-  getBridges,
+  createBridge,
+  createExternalMediaChannel,
   getBridgeById,
-};
+  getBridges,
+  getChannels,
+  playAudio,
+  wait,
+}

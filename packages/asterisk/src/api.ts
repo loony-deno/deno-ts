@@ -1,7 +1,7 @@
 // deno-lint-ignore-file no-explicit-any
 import axios, { type AxiosInstance } from "npm:axios"
 
-class AriAPI {
+export default class AriAPI {
   client: AxiosInstance
   constructor({
     baseUrl,
@@ -187,5 +187,3 @@ class AriAPI {
     get: (soundId: string) => this.client.get(`/sounds/${soundId}`),
   }
 }
-
-module.exports = AriAPI

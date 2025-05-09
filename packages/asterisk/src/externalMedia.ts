@@ -2,6 +2,7 @@ import fs from "node:fs"
 import dgram, { type RemoteInfo, type Socket } from "node:dgram"
 import { Readable } from "node:stream"
 import type { Buffer } from "node:buffer"
+import EventEmitter from "node:events"
 
 // Save original pipe method from Readable
 const pipe = Readable.prototype.pipe
@@ -11,22 +12,31 @@ interface PipedSocket extends Socket {
   pipe?: typeof pipe
 }
 
-export default class RtpUdpServerSocket {
+export default class RtpUdpServerSocket extends EventEmitter {
   private server: PipedSocket
   private swap16: boolean
-  private alsoWritePath: string
+  private audioOutputPath: string
   private fileStream?: fs.WriteStream
   private address: string
   private port: number
 
-  constructor(host: string, swap16: boolean, alsoWritePath: string) {
+  constructor({
+    host,
+    swap16,
+    audioOutputPath,
+  }: {
+    host: string
+    swap16: boolean
+    audioOutputPath: string
+  }) {
+    super()
     this.server = dgram.createSocket("udp4") as PipedSocket
 
     // Attach stream pipe if needed
     this.server.pipe = pipe
 
     this.swap16 = swap16 ?? false
-    this.alsoWritePath = alsoWritePath
+    this.audioOutputPath = audioOutputPath
     const [addr, port] = host.split(":")
     this.address = addr
     this.port = parseInt(port, 10)
@@ -34,8 +44,8 @@ export default class RtpUdpServerSocket {
   }
 
   run(): void {
-    if (this.alsoWritePath) {
-      this.fileStream = fs.createWriteStream(this.alsoWritePath, {
+    if (this.audioOutputPath) {
+      this.fileStream = fs.createWriteStream(this.audioOutputPath, {
         autoClose: true,
       })
     }
@@ -70,8 +80,18 @@ export default class RtpUdpServerSocket {
     this.server.on("listening", () => {
       const addr = this.server.address()
       if (typeof addr === "object") {
-        console.log(`server listening ${addr.address}:${addr.port}`)
+        console.log(`External media listening on ${addr.address}:${addr.port}`)
       }
+    })
+
+    this.on("start", () => {
+      this.fileStream = fs.createWriteStream(this.audioOutputPath, {
+        autoClose: true,
+      })
+    })
+
+    this.on("stop", () => {
+      this.fileStream?.close()
     })
 
     this.server.bind(this.port, this.address)
